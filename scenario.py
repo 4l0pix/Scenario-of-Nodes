@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.cluster import KMeans
 import pandas as pd
+import math
 import warnings
 
 # Ignore warnings for cleaner output
@@ -120,6 +121,19 @@ def visualize_subgroups(graph, subgroups):
     plt.title(f'Subgroups\nNumber:{len(subgroups)}')
     plt.show()
 
+
+def euclid_dist(sample,centroids):
+    distances=[math.dist(sample,centroids[0]),math.dist(sample,centroids[1]),math.dist(sample,centroids[2])]
+    print("\n")
+    for index,i in enumerate (distances):
+        print(f"Distance{index}--->",i)
+    
+
+    
+###############################################################################    
+    
+    
+
 # Create the graph and match the dataset to the nodes
 graph, node_positions = graph_creation()
 match_dataset_to_graph(graph)
@@ -130,9 +144,11 @@ match_dataset_to_graph(graph)
     #print(graph.nodes[node_id]['label'], "--->", graph.nodes[node_id]['data'])
 
 # Perform clustering for each node and display the results
+centers=[]
 for i, node in enumerate(graph.nodes()):
     data = graph.nodes[node]['data']
     cluster_centers, cluster_radii = clustering(data)
+    centers.append(cluster_centers)
     #print("Node", graph.nodes[node]['label'], "centroids:", cluster_centers, "\nradius:", cluster_radii)
 
 # Create subgroups using Louvain Modularity
@@ -150,3 +166,9 @@ for i in subgroups:
     #max_value = mean_dict[max_key]
     #print("The most important node is-->", max_key, " with overall centrality:", max_value)
 
+new_data = pd.read_csv("Cancer_Data_New.csv")
+# For every sample we will need 3 distances
+for index,row in new_data.iloc[1:].iterrows():
+    sample = row.values
+    for centroid in centers:
+        euclid_dist(sample,centroid)
