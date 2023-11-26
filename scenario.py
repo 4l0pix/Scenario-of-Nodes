@@ -79,7 +79,6 @@ def clustering(data):
         radius = np.max(np.linalg.norm(cluster_points - center, axis=1))
         cluster_radii.append(radius)
     cluster_labels = cluster_labels[:num_nodes]
-   
     return cluster_centers, cluster_radii
 
 # Function to calculate the importance of nodes in a subgroup
@@ -91,9 +90,9 @@ def importance(graph, subgroup):
     bet_centrality = nx.betweenness_centrality(Subgraph)
     # Calculate the Katz Centrality
     k_centrality = nx.katz_centrality(Subgraph)
-    print("\nDegree Centrality-->", centrality_deg)
-    print("Betweenness Centrality-->", bet_centrality)
-    print("Katz Centrality-->", k_centrality)
+    #print("\nDegree Centrality-->", centrality_deg)
+    #print("Betweenness Centrality-->", bet_centrality)
+    #print("Katz Centrality-->", k_centrality)
     # Create a new dictionary for the means
     mean_dict = {}
     # Iterate through the keys
@@ -122,14 +121,39 @@ def visualize_subgroups(graph, subgroups):
     plt.show()
 
 
-def euclid_dist(sample,centroids):
+def euclid_dist(sample,centroids,radiuses):
+    # We calculate the euclidean distances between each sample and each node centroid
     distances=[math.dist(sample,centroids[0]),math.dist(sample,centroids[1]),math.dist(sample,centroids[2])]
-    print("\n")
-    for index,i in enumerate (distances):
-        print(f"Distance{index}--->",i)
-    
+    #print("\n")
+    #for index,i in enumerate (distances):
+        #print(f"Distance{index}--->",i)
+    closest_dist = min(distances) # We get the closest distance
+    rad_index = distances.index(closest_dist) # And the radius of the cluster with the closest distance
+    if closest_dist <= radiuses[rad_index]:
+        ddi = 1  #/(1+math.exp(closest_dist))
+    else:
+        ddi = 0    
+    return ddi, radiuses[rad_index]
 
-    
+def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree):
+    for ii in i: # We get each nodes centroid and radius
+        centroids = centers[ii] 
+        radius = radiuses[ii]
+        # For every sample we will need 3 distances
+        for index,row in new_data.iloc[1:].iterrows():
+            sample = row.values # We get each sample
+            ddi,rad = euclid_dist(sample,centroids,radius)
+            # The DDI list hosts [node_index, DDI, radius of the cluster]
+            DDI.append([ii,ddi,rad])
+        
+        i = tuple(i)       
+        
+        for j in range(len(i)): # For each node in the subgroup (i is a tuple of indexes)
+            for k in DDI: # For every sublist in the DDI list
+                if k[0] == i[j]: # If the 1st column(node index) == the node we are currently dealing with    
+                    final_i_d[j] += k[1]*importance_degree[k[0]]           
+    return final_i_d
+
 ###############################################################################    
     
     
@@ -144,11 +168,13 @@ match_dataset_to_graph(graph)
     #print(graph.nodes[node_id]['label'], "--->", graph.nodes[node_id]['data'])
 
 # Perform clustering for each node and display the results
-centers=[]
+centers = [] 
+radiuses = []
 for i, node in enumerate(graph.nodes()):
     data = graph.nodes[node]['data']
     cluster_centers, cluster_radii = clustering(data)
     centers.append(cluster_centers)
+    radiuses.append(cluster_radii)
     #print("Node", graph.nodes[node]['label'], "centroids:", cluster_centers, "\nradius:", cluster_radii)
 
 # Create subgroups using Louvain Modularity
@@ -158,17 +184,28 @@ subgroups = nx.community.louvain_communities(graph, seed=123)
 visualize_graph(graph)
 visualize_subgroups(graph, subgroups)
 
+importance_degree = {node:0 for node in range(15)}
 # Calculate and display the importance of nodes in each subgroup
+#new_data = pd.read_csv("Cancer_Data_New.csv")
+new_data = data
+DDI = []
+
 for i in subgroups:
+    final_i_d = [0]*len(i)   # Final importance degree
     mean_dict = importance(graph, i)
-    print("Mean Importance Centrality Degrees--->",mean_dict)
+    # For every node we calculate the mean importance degree
+    for node in range(num_nodes):
+        if node in i:    
+            # We save it into a dictionary in order to use it later in the DDI
+            importance_degree[node] = mean_dict[node]
+            
+    #print("Mean Importance Centrality Degrees--->",mean_dict)
     #max_key = max(mean_dict, key=mean_dict.get)
     #max_value = mean_dict[max_key]
     #print("The most important node is-->", max_key, " with overall centrality:", max_value)
-
-new_data = pd.read_csv("Cancer_Data_New.csv")
-# For every sample we will need 3 distances
-for index,row in new_data.iloc[1:].iterrows():
-    sample = row.values
-    for centroid in centers:
-        euclid_dist(sample,centroid)
+    # Step 7
+    final_i_d = final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree)
+    max_fid = max(final_i_d)
+    print("\nSubgroup--->",i)
+    print("Importance degrees--->",final_i_d)
+    print("The most important degree--->",max_fid)
