@@ -27,7 +27,7 @@ def graph_creation():
         node_lbl = "N" + str(i)
         graph.add_node(i, pos=pos, label=node_lbl)
     
-    # Add edges with a given probability of connection
+    # Add edges with a given probability of connection (given 0.25 randomly)
     probability_of_connection = 0.25
     for i in range(num_nodes):
         for j in range(i + 1, num_nodes):
@@ -111,9 +111,7 @@ def visualize_subgroups(graph, subgroups):
     for i, subgroup in enumerate(subgroups):
         for node in subgroup:
             subgroup_colors[node] = i
-
     node_colors = [subgroup_colors.get(node, -1) for node in graph.nodes()]
-
     # Visualize the graph with nodes colored by subgroups
     pos = nx.get_node_attributes(graph, 'pos')
     nx.draw(graph, pos, node_color=node_colors, with_labels=True, node_size=200, font_size=8, edge_color='black')
@@ -145,9 +143,7 @@ def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree):
             ddi,rad = euclid_dist(sample,centroids,radius)
             # The DDI list hosts [node_index, DDI, radius of the cluster]
             DDI.append([ii,ddi,rad])
-        
         i = tuple(i)       
-        
         for j in range(len(i)): # For each node in the subgroup (i is a tuple of indexes)
             for k in DDI: # For every sublist in the DDI list
                 if k[0] == i[j]: # If the 1st column(node index) == the node we are currently dealing with    
@@ -155,8 +151,6 @@ def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree):
     return final_i_d
 
 ###############################################################################    
-    
-    
 
 # Create the graph and match the dataset to the nodes
 graph, node_positions = graph_creation()
@@ -186,11 +180,13 @@ visualize_subgroups(graph, subgroups)
 
 importance_degree = {node:0 for node in range(15)}
 # Calculate and display the importance of nodes in each subgroup
-#new_data = pd.read_csv("Cancer_Data_New.csv")
-new_data = data
-DDI = []
 
+new_data = pd.read_csv("Cancer_Data_New.csv")
+#new_data = data
+DDI = []
+most_important_node = [0,0] 
 for i in subgroups:
+    i = list(i) # We turn the set into a list to be easier to handle
     final_i_d = [0]*len(i)   # Final importance degree
     mean_dict = importance(graph, i)
     # For every node we calculate the mean importance degree
@@ -198,14 +194,11 @@ for i in subgroups:
         if node in i:    
             # We save it into a dictionary in order to use it later in the DDI
             importance_degree[node] = mean_dict[node]
-            
-    #print("Mean Importance Centrality Degrees--->",mean_dict)
-    #max_key = max(mean_dict, key=mean_dict.get)
-    #max_value = mean_dict[max_key]
-    #print("The most important node is-->", max_key, " with overall centrality:", max_value)
-    # Step 7
     final_i_d = final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree)
     max_fid = max(final_i_d)
+    max_fid_index = final_i_d.index(max_fid)
     print("\nSubgroup--->",i)
     print("Importance degrees--->",final_i_d)
-    print("The most important degree--->",max_fid)
+    #print("The most important degree--->",max_fid)
+    most_important_node = [i[max_fid_index], max_fid]
+    print(f"So the most important node is {most_important_node[0]} with importance degree {most_important_node[1]}")
