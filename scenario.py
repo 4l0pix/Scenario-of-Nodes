@@ -3,37 +3,38 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
 import math
+import time
 import warnings
 
 # Ignore warnings for cleaner output
 warnings.filterwarnings("ignore")
 
-# Define the number of nodes in the graph
-num_nodes = 30
+###FOR METRICS###
+num_nodes = 30              # Define the number of nodes in the graph
+StartingPointData = []      # The data that are used as a starting point in the model
+NewIncomingData = []        # All the new data that are used to update the most important node
+MostImportantNodes=[]       # A general purpose list that contains most important nodes of each subgroup
 
 
 # Function to create a random graph with nodes and edges
 def graph_creation():
     # Create an empty graph
-    graph = nx.Graph()
-    
+    graph = nx.Graph()  
     # Generate random node positions with uniform distribution in a 2D space
-    node_positions = np.random.uniform(-1, 1, size=(num_nodes, 2))
-    
+    node_positions = np.random.uniform(-1, 1, size=(num_nodes, 2))    
     # Add nodes to the graph with positions
     for i, pos in enumerate(node_positions):
         node_lbl = "N" + str(i)
-        graph.add_node(i, pos=pos, label=node_lbl)
-    
+        graph.add_node(i, pos=pos, label=node_lbl)  
     # Add edges with a given probability of connection (given 0.25 randomly)
     probability_of_connection = 0.25
     for i in range(num_nodes):
         for j in range(i + 1, num_nodes):
             if np.random.uniform(0, 1) < probability_of_connection:
-                graph.add_edge(i, j)
-                
+                graph.add_edge(i, j)           
     return graph, node_positions
 
 # Function to visualize the graph
@@ -64,6 +65,8 @@ def match_dataset_to_graph(graph):
             subset = subset.dropna(axis=1, how='any')
             # Store the subset in the graph node
             graph.nodes[i]['data'] = subset
+            # We also store it in the StartingPointData list
+        StartingPointData.append(graph.nodes[i]['data'])
 
 # Function to perform K-Means clustering on data
 def clustering(data):
@@ -117,7 +120,6 @@ def visualize_subgroups(graph, subgroups):
     plt.title(f'Subgroups\nNumber:{len(subgroups)}')
     plt.show()
 
-
 def euclid_dist(sample,centroids,radiuses):
     # We calculate the euclidean distances between each sample and each node centroid
     distances=[math.dist(sample,centroids[0]),math.dist(sample,centroids[1]),math.dist(sample,centroids[2])]
@@ -155,7 +157,7 @@ def new_data_importation(head):
     return new_data
 
 
-def main(head):
+def update_nodes(head):
     importance_degree = {node:0 for node in range(15)}
     # Calculate and display the importance of nodes in each subgroup
     new_data = new_data_importation(head)
@@ -163,7 +165,6 @@ def main(head):
     head += 500
     DDI = []
     most_important_node = [0,0]
-    MostImportantNodes=[]
     for i in subgroups:
         i = list(i) # We turn the set into a list to be easier to handle
         final_i_d = [0]*len(i)   # Final importance degree
@@ -176,20 +177,27 @@ def main(head):
         final_i_d = final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree,new_data)
         max_fid = max(final_i_d)
         max_fid_index = final_i_d.index(max_fid)
-        print("\nSubgroup--->",i)
-        print("Importance degrees--->",final_i_d)
+        #print("\nSubgroup--->",i)
+        #print("Importance degrees--->",final_i_d)
         #print("The most important degree--->",max_fid)
         most_important_node = [i[max_fid_index], max_fid]
         MostImportantNodes.append(most_important_node[0])    
-        print(f"So the most important node is {most_important_node[0]} with importance degree {most_important_node[1]}")
+        #print(f"Most important node is {most_important_node[0]} with importance degree {most_important_node[1]}")
     
     head2 = 500//len(subgroups)
     for node in MostImportantNodes:
         new_node_data = new_data.head(head2)
         data = pd.concat([graph.nodes[node]['data'], new_node_data], ignore_index=False)
         graph.nodes[node]['data'] = data
+        NewIncomingData.append(data)
         head2+=head2
     return head
+
+"""
+def measuring_accuracy():
+    for node in MostImportantNodes:
+        for dataframe,i in enumerate (StartingPointData):
+            if """
 ###############################################################################    
 # Create the graph and match the dataset to the nodes
 graph, node_positions = graph_creation()
@@ -210,11 +218,12 @@ subgroups = nx.community.louvain_communities(graph, seed=123)
 # Visualize the graph and subgroups
 visualize_graph(graph)
 visualize_subgroups(graph, subgroups)
-######### Display the datasets associated with each graph node  ##########
-#for i, node_id in enumerate(graph.nodes()):
-    #print(graph.nodes[node_id]['label'], "--->", graph.nodes[node_id]['data'])
-###############################################################################
-head=500 # this means we get the a batch of 500 values each time
-for i in range(4):
-    print("#########################################################################")
-    head = main(head)
+
+head=500 # This means we get the a batch of 500 values each time
+start = time.time()
+for i in range(10):
+    #print(f"\n\n\nRound{i}")
+    head = update_nodes(head) 
+end = time.time()
+time_elapsed = end-start
+CosineSimilarity = cosine_similarity(StartingPointData,NewIncomingData)
