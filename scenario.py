@@ -3,7 +3,6 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.cluster import KMeans
-from sklearn.metrics.pairwise import cosine_similarity
 import pandas as pd
 import math
 import time
@@ -13,10 +12,9 @@ import warnings
 warnings.filterwarnings("ignore")
 
 ###FOR METRICS###
-num_nodes = 30              # Define the number of nodes in the graph
-StartingPointData = []      # The data that are used as a starting point in the model
-NewIncomingData = []        # All the new data that are used to update the most important node
-MostImportantNodes=[]       # A general purpose list that contains most important nodes of each subgroup
+num_nodes = 30             # Define the number of nodes in the graph
+StartingPointData = []    # The data that are used as a starting point in the model
+NewIncomingData = []     # All the new data that are used to update the most important node
 
 
 # Function to create a random graph with nodes and edges
@@ -47,25 +45,24 @@ def visualize_graph(graph):
 
 # Function to match a dataset to the graph nodes
 def match_dataset_to_graph(graph):
+    # Read the data from the "Cancer_Data.csv" file
+    data = pd.read_csv("Cancer_Data.csv")
+    # Map labels 'M' and 'B' to 0 and 1
+    conversion_mapping = {'M': 0, 'B': 1}
+    data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
+    data.drop(columns="id", axis=1, inplace=True)
+    # Shuffle the data
+    data = data.sample(frac=1, random_state=42)
     for i in range(num_nodes):
-        # Read the data from the "Cancer_Data.csv" file
-        data = pd.read_csv("Cancer_Data.csv")
-        # Map labels 'M' and 'B' to 0 and 1
-        conversion_mapping = {'M': 0, 'B': 1}
-        data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
-        data.drop(columns="id", axis=1, inplace=True)
-        # Shuffle the data
-        data = data.sample(frac=1, random_state=42)
         # Create subsets of the data for each graph node
         subset_size = len(data) // num_nodes
-        for i in range(num_nodes):
-            head = i * subset_size
-            tail = (i + 1) * subset_size
-            subset = data[head:tail]
-            subset = subset.dropna(axis=1, how='any')
-            # Store the subset in the graph node
-            graph.nodes[i]['data'] = subset
-            # We also store it in the StartingPointData list
+        head = i * subset_size
+        tail = (i + 1) * subset_size
+        subset = data[head:tail]
+        subset = subset.dropna(axis=1, how='any')
+        # Store the subset in the graph node
+        graph.nodes[i]['data'] = subset
+        # We also store it in the StartingPointData list
         StartingPointData.append(graph.nodes[i]['data'])
 
 # Function to perform K-Means clustering on data
@@ -128,10 +125,7 @@ def euclid_dist(sample,centroids,radiuses):
         #print(f"Distance{index}--->",i)
     closest_dist = min(distances) # We get the closest distance
     rad_index = distances.index(closest_dist) # And the radius of the cluster with the closest distance
-    if closest_dist <= radiuses[rad_index]:
-        ddi = 1  #/(1+math.exp(closest_dist))
-    else:
-        ddi = 0    
+    ddi = 1 if (closest_dist <= radiuses[rad_index]) else 0 
     return ddi, radiuses[rad_index]
 
 def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree,new_data):
@@ -151,18 +145,15 @@ def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree,n
                     final_i_d[j] += k[1]*importance_degree[k[0]]           
     return final_i_d
 
-def new_data_importation(head):
-    data = pd.read_csv("Cancer_Data_New.csv")
-    new_data = data.head(head)
-    return new_data
 
+def new_data_importation(head,tail,data):
+    return data.iloc[head:tail]
 
-def update_nodes(head):
+def update_nodes(new_data):
+    global MostImportantNodes
     importance_degree = {node:0 for node in range(15)}
     # Calculate and display the importance of nodes in each subgroup
-    new_data = new_data_importation(head)
     #print(new_data)
-    head += 500
     DDI = []
     most_important_node = [0,0]
     for i in subgroups:
@@ -181,23 +172,18 @@ def update_nodes(head):
         #print("Importance degrees--->",final_i_d)
         #print("The most important degree--->",max_fid)
         most_important_node = [i[max_fid_index], max_fid]
-        MostImportantNodes.append(most_important_node[0])    
-        #print(f"Most important node is {most_important_node[0]} with importance degree {most_important_node[1]}")
-    
-    head2 = 500//len(subgroups)
+        MostImportantNodes = np.append(MostImportantNodes,most_important_node[0]) if most_important_node[0] not in MostImportantNodes else MostImportantNodes
+        #print(f"Most important node is {most_important_node[0]} with importance degree {most_important_node[1]}")    
+    head = 0
+    tail = 500//len(subgroups)
     for node in MostImportantNodes:
-        new_node_data = new_data.head(head2)
-        data = pd.concat([graph.nodes[node]['data'], new_node_data], ignore_index=False)
-        graph.nodes[node]['data'] = data
-        NewIncomingData.append(data)
-        head2+=head2
-    return head
+        new_node_data = new_data.iloc[head:tail]
+        graph.nodes[node]['data'] = pd.concat([graph.nodes[node]['data'], new_node_data], ignore_index=False)
+        NewIncomingData.append(new_node_data)
+        print(new_node_data,"was added to node:" ,node)
+        head = tail + 1
+        tail += tail
 
-"""
-def measuring_accuracy():
-    for node in MostImportantNodes:
-        for dataframe,i in enumerate (StartingPointData):
-            if """
 ###############################################################################    
 # Create the graph and match the dataset to the nodes
 graph, node_positions = graph_creation()
@@ -206,7 +192,7 @@ match_dataset_to_graph(graph)
 # Perform clustering for each node and display the results
 centers = [] 
 radiuses = []
-for i, node in enumerate(graph.nodes()):
+for node in graph.nodes():
     data = graph.nodes[node]['data']
     cluster_centers, cluster_radii = clustering(data)
     centers.append(cluster_centers)
@@ -218,12 +204,20 @@ subgroups = nx.community.louvain_communities(graph, seed=123)
 # Visualize the graph and subgroups
 visualize_graph(graph)
 visualize_subgroups(graph, subgroups)
-
-head=500 # This means we get the a batch of 500 values each time
+del(data)
+batchStart = 0 # This means we get the a batch of 500 values each time
+batchStop = 1000
+MostImportantNodes = np.array([]) # A general purpose np.array that contains most important nodes of each subgroup
 start = time.time()
-for i in range(10):
-    #print(f"\n\n\nRound{i}")
-    head = update_nodes(head) 
+data = pd.read_csv("Cancer_Data_New.csv")
+for i in range(5):
+    print("Round",i)
+    new_data = new_data_importation(batchStart,batchStop,data)
+    update_nodes(new_data)
+    batchStart = batchStop + 1
+    batchStop += 1000
 end = time.time()
+del(data)
 time_elapsed = end-start
-CosineSimilarity = cosine_similarity(StartingPointData,NewIncomingData)
+
+print(time_elapsed)
