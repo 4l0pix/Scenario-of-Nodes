@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Jan  4 21:26:55 2024
+
+@author: al0pix
+"""
+
 # Import necessary libraries
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -6,17 +14,19 @@ from sklearn.cluster import KMeans
 import pandas as pd
 import math
 import time
+from sklearn.metrics.pairwise import cosine_similarity
 import warnings
 
 # Ignore warnings for cleaner output
 warnings.filterwarnings("ignore")
-
+path1 = "Cancer_Data.csv"
+path2 = "Cancer_Data_New.csv"
 ###FOR METRICS###
-num_nodes = 30             # Define the number of nodes in the graph
+num_nodes = 20             # Define the number of nodes in the graph
 StartingPointData = []    # The data that are used as a starting point in the model
 NewIncomingData = []     # All the new data that are used to update the most important node
-
-
+MostImportantNodesData = [] # The data of the most important nodes that will help us determine the similarity score
+RestNodesData = [] 
 # Function to create a random graph with nodes and edges
 def graph_creation():
     # Create an empty graph
@@ -25,8 +35,7 @@ def graph_creation():
     node_positions = np.random.uniform(-1, 1, size=(num_nodes, 2))    
     # Add nodes to the graph with positions
     for i, pos in enumerate(node_positions):
-        node_lbl = "N" + str(i)
-        graph.add_node(i, pos=pos, label=node_lbl)  
+        graph.add_node(i, pos=pos, label="N" + str(i))  
     # Add edges with a given probability of connection (given 0.25 randomly)
     probability_of_connection = 0.25
     for i in range(num_nodes):
@@ -46,7 +55,7 @@ def visualize_graph(graph):
 # Function to match a dataset to the graph nodes
 def match_dataset_to_graph(graph):
     # Read the data from the "Cancer_Data.csv" file
-    data = pd.read_csv("Cancer_Data.csv")
+    data = pd.read_csv(path1)
     # Map labels 'M' and 'B' to 0 and 1
     conversion_mapping = {'M': 0, 'B': 1}
     data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
@@ -145,12 +154,8 @@ def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree,n
                     final_i_d[j] += k[1]*importance_degree[k[0]]           
     return final_i_d
 
-
-def new_data_importation(head,tail,data):
-    return data.iloc[head:tail]
-
-def update_nodes(new_data):
-    global MostImportantNodes
+def most_important_nodes(new_data):
+    global MostImportantNodes, MostImportantNodesData
     importance_degree = {node:0 for node in range(15)}
     # Calculate and display the importance of nodes in each subgroup
     #print(new_data)
@@ -172,18 +177,36 @@ def update_nodes(new_data):
         #print("Importance degrees--->",final_i_d)
         #print("The most important degree--->",max_fid)
         most_important_node = [i[max_fid_index], max_fid]
-        MostImportantNodes = np.append(MostImportantNodes,most_important_node[0]) if most_important_node[0] not in MostImportantNodes else MostImportantNodes
+        MostImportantNodes.append(most_important_node[0]) if most_important_node[0] not in MostImportantNodes else MostImportantNodes
         #print(f"Most important node is {most_important_node[0]} with importance degree {most_important_node[1]}")    
+    
+def new_data_importation(head,tail,data):
+    return data.iloc[head:tail]
+
+def update_nodes(new_data):
     head = 0
-    tail = 500//len(subgroups)
+    tail = 500//len(MostImportantNodes)
     for node in MostImportantNodes:
         new_node_data = new_data.iloc[head:tail]
-        graph.nodes[node]['data'] = pd.concat([graph.nodes[node]['data'], new_node_data], ignore_index=False)
+        maxSim,maxSimIndx = sim4importN(new_node_data)
+        graph.nodes[maxSimIndx]['data'] = pd.concat([graph.nodes[maxSimIndx]['data'], new_node_data], ignore_index=False)
         NewIncomingData.append(new_node_data)
-        print(new_node_data,"was added to node:" ,node)
+        print("Data was added to node:" ,maxSimIndx, "with similarity:", maxSim)
         head = tail + 1
         tail += tail
-
+        
+        
+def sim4importN(new_node_data):  # Similarity for important Nodes
+    print("\n\nNew Batch of data")
+    maxSim = 0  
+    maxSimIndx = -1 # If -1 is returned then we have an error
+    for i in MostImportantNodes:
+            #print(cosine_similarity(new_node_data,graph.nodes[i]['data']))
+            if cosine_similarity(new_node_data,graph.nodes[i]['data']).mean() > maxSim:
+                maxSim = cosine_similarity(new_node_data,graph.nodes[i]['data']).mean()
+                maxSimIndx = i
+    return maxSim, maxSimIndx
+            
 ###############################################################################    
 # Create the graph and match the dataset to the nodes
 graph, node_positions = graph_creation()
@@ -199,7 +222,7 @@ for node in graph.nodes():
     radiuses.append(cluster_radii)
     #print("Node", graph.nodes[node]['label'], "centroids:", cluster_centers, "\nradius:", cluster_radii)
 # Create subgroups using Louvain Modularity
-subgroups = nx.community.louvain_communities(graph, seed=123)
+subgroups = nx.community.louvain_communities(graph, seed=np.random)
 
 # Visualize the graph and subgroups
 visualize_graph(graph)
@@ -207,17 +230,33 @@ visualize_subgroups(graph, subgroups)
 del(data)
 batchStart = 0 # This means we get the a batch of 500 values each time
 batchStop = 1000
-MostImportantNodes = np.array([]) # A general purpose np.array that contains most important nodes of each subgroup
+MostImportantNodes = [] # A general purpose list that contains most important nodes of each subgroup
 start = time.time()
-data = pd.read_csv("Cancer_Data_New.csv")
+data = pd.read_csv(path2)
+
+
 for i in range(5):
-    print("Round",i)
+    #print("Round",i)
     new_data = new_data_importation(batchStart,batchStop,data)
+    most_important_nodes(new_data)
     update_nodes(new_data)
     batchStart = batchStop + 1
     batchStop += 1000
 end = time.time()
 del(data)
+for node in range(num_nodes):
+    if node in MostImportantNodes:
+        MostImportantNodesData.append(StartingPointData[node])
+    else:
+        RestNodesData.append(StartingPointData[node])
 time_elapsed = end-start
-
-print(time_elapsed)
+NewIncomingData = pd.concat(NewIncomingData, axis=0, ignore_index=True)
+MostImportantNodesData = pd.concat(MostImportantNodesData, axis=0, ignore_index=True)
+RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
+#similarity_matrix1 = cosine_similarity(MostImportantNodesData, NewIncomingData)
+#similarity_matrix2 = cosine_similarity(RestNodesData, NewIncomingData)
+print("Most Important Nodes Values(combined)", len(MostImportantNodesData))
+print("New Incoming Values---> ", len(NewIncomingData))
+#print("Cosine Similarity Score (betweeen the most import. nodes and new data---> ", "{:.4f}".format(similarity_matrix1.mean()))
+#print("Cosine Similarity Score (betweeen the rest of the nodes and new data---> ", "{:.4f}".format(similarity_matrix2.mean()))
+print("Time elapsed---> ", time_elapsed)
