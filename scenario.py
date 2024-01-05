@@ -127,6 +127,8 @@ def visualize_subgroups(graph, subgroups):
     plt.show()
 
 def euclid_dist(sample,centroids,radiuses):
+    a=0.5   # Parameters for the DDI
+    # b = something else
     # We calculate the euclidean distances between each sample and each node centroid
     distances=[math.dist(sample,centroids[0]),math.dist(sample,centroids[1]),math.dist(sample,centroids[2])]
     #print("\n")
@@ -134,7 +136,7 @@ def euclid_dist(sample,centroids,radiuses):
         #print(f"Distance{index}--->",i)
     closest_dist = min(distances) # We get the closest distance
     rad_index = distances.index(closest_dist) # And the radius of the cluster with the closest distance
-    ddi = 1 if (closest_dist <= radiuses[rad_index]) else 0 
+    ddi = 1/1+math.exp(a*closest_dist) if (closest_dist <= radiuses[rad_index]) else 0 
     return ddi, radiuses[rad_index]
 
 def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree,new_data):
