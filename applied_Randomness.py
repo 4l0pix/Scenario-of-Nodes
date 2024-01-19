@@ -14,7 +14,8 @@ warnings.filterwarnings("ignore")
 path1 = "Cancer_Data.csv"
 path2 = "Cancer_Data_New.csv"
 ###FOR METRICS###
-num_nodes = 20             # Define the number of nodes in the graph
+num_nodes = 15            # Define the number of nodes in the graph
+batch = 2500
 StartingPointData = []    # The data that are used as a starting point in the model
 NewIncomingData = []     # All the new data that are used to update the most important node
 MostImportantNodesData = [] # The data of the most important nodes that will help us determine the similarity score
@@ -152,9 +153,6 @@ def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree,n
                     final_i_d[j] = round((k[1]*importance_degree[k[0]]),4)           
     return final_i_d
 
-
-
-
             
 def most_important_nodes(new_data):
     global MostImportantNodes, MostImportantNodesData, RandomMostImportantNodes, SmartMostImportantNodes
@@ -177,7 +175,7 @@ def most_important_nodes(new_data):
         max_fid = max(final_i_d)
         #print("Max--->",max_fid)
         max_fid_index = final_i_d.index(max_fid)
-        SmartMostImportantNodes.append([max_fid_index,max_fid])
+        SmartMostImportantNodes.append([i[max_fid_index],max_fid])
         for node in i:
             if node in most_important_nodes_rand:
                 RandomMostImportantNodes.append([node,final_i_d[i.index(node)]])
@@ -190,7 +188,7 @@ def new_data_importation(head,tail,data):
 
 def update_nodes(new_data,OverallSimilarity):
     head = 0
-    tail = 1250//len(MostImportantNodes)
+    tail = 1250//len(MostImportantNodes)    # The first value of tail should be half of the batch size 
     for node in MostImportantNodes:
         new_node_data = new_data.iloc[head:tail]
         maxSim,maxSimIndx = sim4importN(new_node_data)
@@ -236,7 +234,7 @@ visualize_graph(graph)
 visualize_subgroups(graph, subgroups)
 del(data)
 batchStart = 0 # This means we get the a batch of 500 values each time
-batchStop = 2500
+batchStop = batch
 MostImportantNodes = [] # A general purpose list that contains most important nodes of each subgroup
 RandomMostImportantNodes = []
 SmartMostImportantNodes = []
@@ -250,7 +248,7 @@ new_data = new_data_importation(batchStart,batchStop,data)
 most_important_nodes(new_data)
 update_nodes(new_data,OverallSimilarity)
 batchStart = batchStop + 1
-batchStop += 2500
+batchStop += batch
 end = time.time()
 del(data)
 for node in range(num_nodes):
@@ -264,13 +262,16 @@ MostImportantNodesData = pd.concat(MostImportantNodesData, axis=0, ignore_index=
 RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
 #similarity_matrix1 = cosine_similarity(MostImportantNodesData, NewIncomingData)
 #similarity_matrix2 = cosine_similarity(RestNodesData, NewIncomingData)
+print("BATCH SIZE",batch)
 print("Most Important Nodes Values(combined)", len(MostImportantNodesData))
 print("New Incoming Values---> ", len(NewIncomingData))
 #print("Cosine Similarity Score (betweeen the most import. nodes and new data---> ", "{:.4f}".format(similarity_matrix1.mean()))
 #print("Cosine Similarity Score (betweeen the rest of the nodes and new data---> ", "{:.4f}".format(similarity_matrix2.mean()))
 
 OverallSimilarity=statistics.mean(OverallSimilarity)
-print("OverallSimilarity--->",OverallSimilarity)
+print("CosineSimilarity--->",OverallSimilarity)
+print("Subgroups--->", len(subgroups))
+print("Time elapsed---> ", time_elapsed)
 print("\nSMART MODEL IMPORTANCE DEGREES")
 for i in range(len(subgroups)):
     print("Smart model:The most important node--->",SmartMostImportantNodes[i][0], "with degree:",SmartMostImportantNodes[i][1])
@@ -278,5 +279,3 @@ for i in range(len(subgroups)):
 print("\nRANDOM MODEL IMPORTANCE DEGREES")
 for i in range(len(subgroups)):
     print("Random model:The most important node--->",RandomMostImportantNodes[i][0], "with degree:",RandomMostImportantNodes[i][1])
-
-print("\nTime elapsed---> ", time_elapsed)
