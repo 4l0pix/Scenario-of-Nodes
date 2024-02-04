@@ -14,8 +14,13 @@ warnings.filterwarnings("ignore")
 path1 = "Cancer_Data.csv"
 path2 = "Cancer_Data_New.csv"
 ###FOR METRICS###
-num_nodes = 15            # Define the number of nodes in the graph
-batch = 2500
+num_nodes = 10          # Define the number of nodes in the graph
+"""
+When we change the number of ndoes we also need to change the incoming data for training. 
+Less nodes, less data.
+In order to make a fair comparison. Also, when changing the num of training data 
+we need to make an adjustment at the data batches.
+"""
 StartingPointData = []    # The data that are used as a starting point in the model
 NewIncomingData = []     # All the new data that are used to update the most important node
 MostImportantNodesData = [] # The data of the most important nodes that will help us determine the similarity score
@@ -41,20 +46,23 @@ def graph_creation():
 def visualize_graph(graph):
     # Draw the graph using Matplotlib
     pos = {i: pos for i, pos in enumerate(node_positions)}
-    nx.draw(graph, pos, with_labels=True, node_size=200, node_color='lightblue', font_size=8, edge_color='black')
-    plt.title('Random Graph with Uniform Distribution of Edges (-1/1)')
+    nx.draw(graph, pos, with_labels=True, node_size=200, node_color='grey', font_size=8, edge_color='black')
+    plt.title('Random Graph with Uniform Distribution of Edges')
     plt.show()
 
 # Function to match a dataset to the graph nodes
 def match_dataset_to_graph(graph):
+    global ogData
     # Read the data from the "Cancer_Data.csv" file
     data = pd.read_csv(path1)
     # Map labels 'M' and 'B' to 0 and 1
-    conversion_mapping = {'M': 0, 'B': 1}
-    data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
-    data.drop(columns="id", axis=1, inplace=True)
+    #conversion_mapping = {'M': 0, 'B': 1}
+    #data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
+    #data.drop(columns="id", axis=1, inplace=True)
     # Shuffle the data
     data = data.sample(frac=1, random_state=42)
+    data=data.head(2220)
+    ogData = len(data)
     for i in range(num_nodes):
         # Create subsets of the data for each graph node
         subset_size = len(data) // num_nodes
@@ -153,9 +161,12 @@ def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree,n
                     final_i_d[j] = round((k[1]*importance_degree[k[0]]),4)           
     return final_i_d
 
+
+
+
             
 def most_important_nodes(new_data):
-    global MostImportantNodes, MostImportantNodesData, RandomMostImportantNodes, SmartMostImportantNodes
+    global MostImportantNodes, RandomMostImportantNodesData, RandomMostImportantNodes, SmartMostImportantNodes
     importance_degree = {node:0 for node in range(15)}
     # Calculate and display the importance of nodes in each subgroup
     #print(new_data)
@@ -175,11 +186,11 @@ def most_important_nodes(new_data):
         max_fid = max(final_i_d)
         #print("Max--->",max_fid)
         max_fid_index = final_i_d.index(max_fid)
-        SmartMostImportantNodes.append([i[max_fid_index],max_fid])
+        SmartMostImportantNodes.append([max_fid_index,max_fid])
         for node in i:
             if node in most_important_nodes_rand:
                 RandomMostImportantNodes.append([node,final_i_d[i.index(node)]])
-        
+                RandomMostImportantNodesData.append(graph.nodes[node]['data'])
         MostImportantNodes.append(i[max_fid_index]) if i[max_fid_index] not in MostImportantNodes else MostImportantNodes
 
 
@@ -188,7 +199,7 @@ def new_data_importation(head,tail,data):
 
 def update_nodes(new_data,OverallSimilarity):
     head = 0
-    tail = 1250//len(MostImportantNodes)    # The first value of tail should be half of the batch size 
+    tail = 2500//len(MostImportantNodes)
     for node in MostImportantNodes:
         new_node_data = new_data.iloc[head:tail]
         maxSim,maxSimIndx = sim4importN(new_node_data)
@@ -233,10 +244,11 @@ most_important_nodes_rand = [np.random.randint(0, num_nodes) for _ in range(len(
 visualize_graph(graph)
 visualize_subgroups(graph, subgroups)
 del(data)
-batchStart = 0 # This means we get the a batch of 500 values each time
-batchStop = batch
+batchStart = 0 # This means we get the a batch of values each time
+batchStop = 5000
 MostImportantNodes = [] # A general purpose list that contains most important nodes of each subgroup
 RandomMostImportantNodes = []
+RandomMostImportantNodesData = []
 SmartMostImportantNodes = []
 OverallSimilarity=[]
 data = pd.read_csv(path2)
@@ -248,7 +260,7 @@ new_data = new_data_importation(batchStart,batchStop,data)
 most_important_nodes(new_data)
 update_nodes(new_data,OverallSimilarity)
 batchStart = batchStop + 1
-batchStop += batch
+batchStop += 5000
 end = time.time()
 del(data)
 for node in range(num_nodes):
@@ -259,19 +271,28 @@ for node in range(num_nodes):
 time_elapsed = end-start
 NewIncomingData = pd.concat(NewIncomingData, axis=0, ignore_index=True)
 MostImportantNodesData = pd.concat(MostImportantNodesData, axis=0, ignore_index=True)
+RandomMostImportantNodesData = pd.concat(RandomMostImportantNodesData,axis=0,ignore_index=True)
 RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
 #similarity_matrix1 = cosine_similarity(MostImportantNodesData, NewIncomingData)
 #similarity_matrix2 = cosine_similarity(RestNodesData, NewIncomingData)
-print("BATCH SIZE",batch)
-print("Most Important Nodes Values(combined)", len(MostImportantNodesData))
-print("New Incoming Values---> ", len(NewIncomingData))
+
+set1A = set(map(tuple, MostImportantNodesData.values))
+set2A = set(map(tuple, NewIncomingData.values))
+jaccard_similarityA = len(set1A.intersection(set2A)) / len(set1A.union(set2A))
+print("Scenario A Jacard Similarity-->", jaccard_similarityA)
+set1B = set(map(tuple, RandomMostImportantNodesData.values))
+set2B = set(map(tuple, NewIncomingData.values))
+jaccard_similarityB = len(set1B.intersection(set2B)) / len(set1B.union(set2B))
+print("Scenario B Jacard Similarity-->", jaccard_similarityB)
+print(f"-----NODES{num_nodes}-----")
+#print("Data per Node for training--->", (ogData//num_nodes))
+#print("New Incoming Values---> ", len(NewIncomingData))
 #print("Cosine Similarity Score (betweeen the most import. nodes and new data---> ", "{:.4f}".format(similarity_matrix1.mean()))
 #print("Cosine Similarity Score (betweeen the rest of the nodes and new data---> ", "{:.4f}".format(similarity_matrix2.mean()))
-
-OverallSimilarity=statistics.mean(OverallSimilarity)
-print("CosineSimilarity--->",OverallSimilarity)
-print("Subgroups--->", len(subgroups))
-print("Time elapsed---> ", time_elapsed)
+#print("Subgroups--->", len(subgroups))
+#OverallSimilarity=statistics.mean(OverallSimilarity)
+#print("OverallSimilarity--->",OverallSimilarity)
+"""
 print("\nSMART MODEL IMPORTANCE DEGREES")
 for i in range(len(subgroups)):
     print("Smart model:The most important node--->",SmartMostImportantNodes[i][0], "with degree:",SmartMostImportantNodes[i][1])
@@ -279,3 +300,5 @@ for i in range(len(subgroups)):
 print("\nRANDOM MODEL IMPORTANCE DEGREES")
 for i in range(len(subgroups)):
     print("Random model:The most important node--->",RandomMostImportantNodes[i][0], "with degree:",RandomMostImportantNodes[i][1])
+"""
+print("\nTime elapsed---> ", time_elapsed)
