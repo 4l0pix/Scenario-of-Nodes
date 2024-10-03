@@ -8,13 +8,12 @@ import math
 import time
 from sklearn.metrics.pairwise import cosine_similarity
 import warnings
-import statistics
 # Ignore warnings for cleaner output
 warnings.filterwarnings("ignore")
 path1 = "Cancer_Data.csv"
-path2 = "Cancer_Data_New.csv"
+path2 = "Cancer_Data_New_Big.csv"
 ###FOR METRICS###
-num_nodes = 10          # Define the number of nodes in the graph
+num_nodes = 20          # Define the number of nodes in the graph
 """
 When we change the number of ndoes we also need to change the incoming data for training. 
 Less nodes, less data.
@@ -24,7 +23,8 @@ we need to make an adjustment at the data batches.
 StartingPointData = []    # The data that are used as a starting point in the model
 NewIncomingData = []     # All the new data that are used to update the most important node
 MostImportantNodesData = [] # The data of the most important nodes that will help us determine the similarity score
-RestNodesData = [] 
+RestNodesData = []
+TaskRanges = []
 # Function to create a random graph with nodes and edges
 def graph_creation():
     # Create an empty graph
@@ -56,9 +56,9 @@ def match_dataset_to_graph(graph):
     # Read the data from the "Cancer_Data.csv" file
     data = pd.read_csv(path1)
     # Map labels 'M' and 'B' to 0 and 1
-    #conversion_mapping = {'M': 0, 'B': 1}
-    #data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
-    #data.drop(columns="id", axis=1, inplace=True)
+    conversion_mapping = {'M': 0, 'B': 1}
+    data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
+    data.drop(columns="id", axis=1, inplace=True)
     # Shuffle the data
     data = data.sample(frac=1, random_state=42)
     data=data.head(2220)
@@ -132,6 +132,10 @@ def euclid_dist(sample,centroids,radiuses):
     a = b/2   # Parameters for the DDI
     
     # We calculate the euclidean distances between each sample and each node centroid
+   # print("Sample:",len(sample))
+   # print("Centroids1:",len(centroids[0]))
+   # print("Centroids2:",len(centroids[1]))
+   # print("Centroids3:",len(centroids[2]))
     distances=[math.dist(sample,centroids[0]),math.dist(sample,centroids[1]),math.dist(sample,centroids[2])]
     #print("\n")
     #for index,i in enumerate (distances):
@@ -160,8 +164,6 @@ def final_importance_degree(centers,radiuses,DDI,i,final_i_d,importance_degree,n
                 if k[0] == i[j]: # If the 1st column(node index) == the node we are currently dealing with    
                     final_i_d[j] = round((k[1]*importance_degree[k[0]]),4)           
     return final_i_d
-
-
 
 
             
@@ -199,17 +201,20 @@ def new_data_importation(head,tail,data):
 
 def update_nodes(new_data,OverallSimilarity):
     head = 0
-    tail = 2500//len(MostImportantNodes)
+    tailSize = batchSize//len(MostImportantNodes)
+    tail = tailSize
     for node in MostImportantNodes:
         new_node_data = new_data.iloc[head:tail]
+        ranges = [(new_node_data[col].min(), new_node_data[col].max()) for col in new_node_data.columns]
+        TaskRanges.append(ranges)
         maxSim,maxSimIndx = sim4importN(new_node_data)
         graph.nodes[maxSimIndx]['data'] = pd.concat([graph.nodes[maxSimIndx]['data'], new_node_data], ignore_index=False)
         NewIncomingData.append(new_node_data)
         #print("Data was added to node:" ,maxSimIndx, "with similarity:", maxSim)
         OverallSimilarity.append(maxSim)
-        head = tail + 1
-        tail += tail
-        
+        head = tail+1
+        tail += tailSize
+ 
         
         
 def sim4importN(new_node_data):  # Similarity for important Nodes
@@ -244,8 +249,9 @@ most_important_nodes_rand = [np.random.randint(0, num_nodes) for _ in range(len(
 visualize_graph(graph)
 visualize_subgroups(graph, subgroups)
 del(data)
+batchSize = 100
 batchStart = 0 # This means we get the a batch of values each time
-batchStop = 5000
+batchStop = batchSize
 MostImportantNodes = [] # A general purpose list that contains most important nodes of each subgroup
 RandomMostImportantNodes = []
 RandomMostImportantNodesData = []
@@ -254,28 +260,42 @@ OverallSimilarity=[]
 data = pd.read_csv(path2)
 start = time.time()
 
-#for i in range():
+for i in range(5):
     #print("Round",i)
-new_data = new_data_importation(batchStart,batchStop,data)
-most_important_nodes(new_data)
-update_nodes(new_data,OverallSimilarity)
-batchStart = batchStop + 1
-batchStop += 5000
+    new_data = new_data_importation(batchStart,batchStop,data)
+    #print(new_data)
+    most_important_nodes(new_data)
+    #print("reached")
+    update_nodes(new_data,OverallSimilarity)
+    batchStart = batchStop + 1
+    batchStop += batchSize
+    #print("reached")
+    
 end = time.time()
 del(data)
+
 for node in range(num_nodes):
     if node in MostImportantNodes:
         MostImportantNodesData.append(StartingPointData[node])
     else:
         RestNodesData.append(StartingPointData[node])
 time_elapsed = end-start
+
+print(f"-----NODES{num_nodes}-----")
+
 NewIncomingData = pd.concat(NewIncomingData, axis=0, ignore_index=True)
 MostImportantNodesData = pd.concat(MostImportantNodesData, axis=0, ignore_index=True)
 RandomMostImportantNodesData = pd.concat(RandomMostImportantNodesData,axis=0,ignore_index=True)
 RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
+TaskRanges = pd.DataFrame(TaskRanges,columns=NewIncomingData.columns)
+
+
+
+
+
+
 #similarity_matrix1 = cosine_similarity(MostImportantNodesData, NewIncomingData)
 #similarity_matrix2 = cosine_similarity(RestNodesData, NewIncomingData)
-
 set1A = set(map(tuple, MostImportantNodesData.values))
 set2A = set(map(tuple, NewIncomingData.values))
 jaccard_similarityA = len(set1A.intersection(set2A)) / len(set1A.union(set2A))
@@ -284,7 +304,7 @@ set1B = set(map(tuple, RandomMostImportantNodesData.values))
 set2B = set(map(tuple, NewIncomingData.values))
 jaccard_similarityB = len(set1B.intersection(set2B)) / len(set1B.union(set2B))
 print("Scenario B Jacard Similarity-->", jaccard_similarityB)
-print(f"-----NODES{num_nodes}-----")
+
 #print("Data per Node for training--->", (ogData//num_nodes))
 #print("New Incoming Values---> ", len(NewIncomingData))
 #print("Cosine Similarity Score (betweeen the most import. nodes and new data---> ", "{:.4f}".format(similarity_matrix1.mean()))
