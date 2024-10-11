@@ -7,6 +7,9 @@ import pandas as pd
 import math
 import time
 import warnings
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics.pairwise import cosine_similarity
+
 # Ignore warnings for cleaner output
 warnings.filterwarnings("ignore")
 path1 = "Cancer_Data.csv"
@@ -236,7 +239,7 @@ def update_nodes(new_data,OverallSimilarity):
         tail += tailSize
         
         
-def jaccard_similarity(df1, df2, sample_size=100):
+def manhattan_distance(df1, df2, sample_size=50):
     # Get the intersection of columns between the two dataframes
     common_columns = set(df1.columns).intersection(df2.columns)
     
@@ -248,22 +251,18 @@ def jaccard_similarity(df1, df2, sample_size=100):
     df1_sample = df1.head(sample_size)
     df2_sample = df2.head(sample_size)
 
-    # Initialize sets to store unique values across rows for each dataframe
-    df1_values = set()
-    df2_values = set()
-
-    # Loop through each row in common columns and add to sets
-    for col in common_columns:
-        df1_values.update(df1_sample[col].dropna().unique())  # Remove NaN and add unique items
-        df2_values.update(df2_sample[col].dropna().unique())
-
-    # Calculate Jaccard similarity: |Intersection| / |Union|
-    intersection = df1_values.intersection(df2_values)
-    union = df1_values.union(df2_values)
-    jaccard_score = len(intersection) / len(union) if union else 0.0
-
-    #print(f"Jaccard Similarity Score: {jaccard_score:.4f}")
-    return jaccard_score
+    """
+    Calculate the Manhattan distance between two datasets.
+    
+    Args:
+    data1 (pd.DataFrame): First dataset.
+    data2 (pd.DataFrame): Second dataset.
+ 
+    Returns:
+    float: The Manhattan distance between the two datasets.
+    """
+    return np.sum(np.abs(df1_sample.values - df2_sample.values))
+    
 
 
 
@@ -295,17 +294,65 @@ def calculate_widest_range(list1, list2):
         return 0, 0  # No increment
     
 
-# Initialize the total Jaccard similarity score, DDI count, and Random count
-total_jaccard_score = 0.0
-DDICount = 0
-RandomCount = 0
-rounds = 10
+def normalize_dataframe(df):
+    """
+    Normalizes all numeric columns in a DataFrame using min-max scaling.
 
-# Initialize the total Jaccard similarity score, DDI count, and Random count
-total_jaccard_score = 0.0
+    Parameters:
+    df (pd.DataFrame): The input DataFrame.
+
+    Returns:
+    pd.DataFrame: A DataFrame with normalized values between 0 and 1 for each numeric column.
+    """
+    # Select only numeric columns
+    numeric_df = df.select_dtypes(include=['number'])
+    
+    # Apply min-max normalization
+    normalized_df = (numeric_df - numeric_df.min()) / (numeric_df.max() - numeric_df.min())
+    
+    # Retain non-numeric columns by merging them back into the normalized DataFrame
+    for col in df.columns:
+        if col not in numeric_df.columns:
+            normalized_df[col] = df[col]
+    
+    return normalized_df
+
+def dataframe_cosine_similarity(df1, df2):
+    """
+    Computes the average cosine similarity between all row pairs in two DataFrames.
+
+    Parameters:
+    df1 (pd.DataFrame): First DataFrame, expected to have the same columns as df2.
+    df2 (pd.DataFrame): Second DataFrame, expected to have the same columns as df1.
+
+    Returns:
+    float: The average cosine similarity between the two DataFrames.
+    """
+    # Check if both dataframes have the same columns
+    if set(df1.columns) != set(df2.columns):
+        raise ValueError("DataFrames must have the same columns to compute similarity")
+
+    # Drop non-numeric columns (like 'diagnosis')
+    df1_numeric = df1.select_dtypes(include=['number'])
+    df2_numeric = df2.select_dtypes(include=['number'])
+    
+    # Compute cosine similarity matrix between all rows in df1 and df2
+    similarity_matrix = cosine_similarity(df1_numeric, df2_numeric)
+    
+    # Compute average similarity by taking the mean of the similarity matrix
+    average_similarity = similarity_matrix.mean()
+    
+    return average_similarity
+
+    
+
+# Initialize cumulative variables
+total_manhattan_distance = 0.0
 DDICount = 0
 RandomCount = 0
-rounds = 10
+rounds = 50
+cumulative_similarity = 0.0  # Cumulative similarity for overall average
+scaler = StandardScaler()
 
 for i in range(rounds):
     ###############################################################################    
@@ -332,19 +379,20 @@ for i in range(rounds):
 
     # Clear unnecessary data from the previous iteration
     del data
-    batchSize = 100
+    batchSize = 500
     batchStart = 0  # This means we get a batch of values each time
     batchStop = batchSize
-    MostImportantNodes = []  # A general purpose list that contains most important nodes of each subgroup
+    MostImportantNodes = []  # A general-purpose list that contains most important nodes of each subgroup
     MostImportantNodesData = []
     RandomMostImportantNodes = []
     RandomMostImportantNodesData = []
     
+    # List to store similarities in inner loop
     OverallSimilarity = []
     data = pd.read_csv(path2)
     start = time.time()
     
-    for j in range(5):  # Changed inner loop variable to avoid shadowing
+    for j in range(3):  # Changed inner loop variable to avoid shadowing
         new_data = new_data_importation(batchStart, batchStop, data)
         most_important_nodes(new_data)
         update_nodes(new_data, OverallSimilarity)
@@ -365,7 +413,6 @@ for i in range(rounds):
             RestNodesData.append(StartingPointData[node])
     
     time_elapsed = end - start
-    print("\nTime elapsed---> ", time_elapsed)
     
     # Resetting lists for new batch
     NewIncomingData = []  # Reset before concatenating
@@ -373,13 +420,13 @@ for i in range(rounds):
     RandomMostImportantNodesData = pd.concat(RandomMostImportantNodesData, axis=0, ignore_index=True)
     RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
     
-    #print("\nSimilarity between the two dataframes:")
+    # Normalize the data for accurate similarity calculation
+    Norm_MostImportantNodesData = normalize_dataframe(MostImportantNodesData)
+    Norm_RandomMostImportantNodesData = normalize_dataframe(RandomMostImportantNodesData)
     
-    # Calculate Jaccard similarity
-    jaccard_score = jaccard_similarity(MostImportantNodesData, RandomMostImportantNodesData)
-    
-    # Add the current Jaccard score to the total score
-    total_jaccard_score += jaccard_score
+    # Calculate the Cosine Similarity of the two dataframes
+    similarity_score = dataframe_cosine_similarity(Norm_MostImportantNodesData, Norm_RandomMostImportantNodesData)
+    cumulative_similarity += similarity_score  # Accumulate similarity score
     
     # Calculate ranges for most important nodes
     MostImportantNodesRanges = [(MostImportantNodesData[col].min(), MostImportantNodesData[col].max()) for col in MostImportantNodesData.columns]
@@ -389,8 +436,11 @@ for i in range(rounds):
     random_increment, ddi_increment = calculate_widest_range(RandomMostImportantNodesRanges, MostImportantNodesRanges)
     RandomCount += random_increment
     DDICount += ddi_increment
-    
+
+# Calculate the overall average similarity after the loop
+average_similarity = cumulative_similarity / rounds
+
 # After the loop, print the total scores
-print("Total Jaccard Similarity Score across all iterations:", total_jaccard_score/rounds)
 print("Overall Random Wideness Score:", RandomCount)
 print("Overall DDI Wideness Score:", DDICount)
+print("Average Cosine Similarity across all iterations:", average_similarity)
