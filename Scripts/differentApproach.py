@@ -9,7 +9,7 @@ import time
 import warnings
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics.pairwise import cosine_similarity
-
+import scipy.stats as stats
 # Ignore warnings for cleaner output
 warnings.filterwarnings("ignore")
 path1 = "Cancer_Data.csv"
@@ -65,7 +65,7 @@ def match_dataset_to_graph(graph):
     data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
     data.drop(columns="id", axis=1, inplace=True)
     # Shuffle the data
-    data = data.sample(frac=1)
+    data = data.sample(frac=1,random_state=42)
     data=data.head(2220)
     ogData = len(data)
     for i in range(num_nodes):
@@ -226,7 +226,7 @@ def most_important_nodes(new_data):
 def new_data_importation(head,tail,data):
     return data.iloc[head:tail]
 
-def update_nodes(new_data,OverallSimilarity):
+def update_nodes(new_data):
     head = 0
     tailSize = batchSize//len(MostImportantNodes)
     tail = tailSize
@@ -238,33 +238,33 @@ def update_nodes(new_data,OverallSimilarity):
         head = tail+1
         tail += tailSize
         
-        
-def manhattan_distance(df1, df2, sample_size=50):
-    # Get the intersection of columns between the two dataframes
-    common_columns = set(df1.columns).intersection(df2.columns)
-    
-    if not common_columns:
-        print("No common columns to compare.")
-        return 0.0
-
-    # Limit the dataframes to the first `sample_size` rows
-    df1_sample = df1.head(sample_size)
-    df2_sample = df2.head(sample_size)
-
+def remove_outliers(df):
     """
-    Calculate the Manhattan distance between two datasets.
-    
-    Args:
-    data1 (pd.DataFrame): First dataset.
-    data2 (pd.DataFrame): Second dataset.
- 
+    Remove outliers from the DataFrame using the Interquartile Range (IQR) method.
+
+    Parameters:
+        df (pd.DataFrame): The input DataFrame from which to remove outliers.
+
     Returns:
-    float: The Manhattan distance between the two datasets.
+        pd.DataFrame: A DataFrame without outliers.
     """
-    return np.sum(np.abs(df1_sample.values - df2_sample.values))
+    # Create a copy of the DataFrame to avoid modifying the original
+    df_cleaned = df.copy()
     
-
-
+    for col in df_cleaned.select_dtypes(include=['float64', 'int64']).columns:
+        # Calculate Q1 (25th percentile) and Q3 (75th percentile)
+        Q1 = df_cleaned[col].quantile(0.25)
+        Q3 = df_cleaned[col].quantile(0.75)
+        IQR = Q3 - Q1
+        
+        # Define bounds for outliers
+        lower_bound = Q1 - 2 * IQR # The number here is the sensitivity/strictness of outlier kicking
+        upper_bound = Q3 + 2 * IQR
+        
+        # Remove outliers
+        df_cleaned = df_cleaned[(df_cleaned[col] >= lower_bound) & (df_cleaned[col] <= upper_bound)]
+    
+    return df_cleaned        
 
 def calculate_widest_range(list1, list2):
     # Function to calculate total width of ranges in a list
@@ -277,22 +277,24 @@ def calculate_widest_range(list1, list2):
     # Calculate total widths for both lists
     total_width_list1 = total_range_width(list1)
     total_width_list2 = total_range_width(list2)
-
-    # Print the results
-    #print(f"Total width of ranges in List 1: {total_width_list1:.4f}")
-    #print(f"Total width of ranges in List 2: {total_width_list2:.4f}")
-
-    # Determine which list has a wider range and return corresponding values
-    if total_width_list1 > total_width_list2:
-        #print("Random Nodes Dataframe has the widest ranges overall.")
-        return 1, 0  # Increment RandomCount
-    elif total_width_list1 < total_width_list2:
-        #print("Most Important Nodes Dataframe has the widest ranges overall.")
-        return 0, 1  # Increment DDICount
-    else:
-        #print("Both Lists have the same total width of ranges.")
-        return 0, 0  # No increment
     
+    # Avoid division by zero (if both widths are zero, return 0%)
+    if total_width_list1 == 0 and total_width_list2 == 0:
+        return "Both dataframes have equal and zero range."
+    
+    # If one of the lists has zero width, it's 100% narrower
+    if total_width_list1 == 0:
+        return "The dataframe that occured from the randomly seleted nodes is 100% wider than the dataframe that occured from DDI."
+    if total_width_list2 == 0:
+        return "The dataframe that occured from DDI is 100% wider than the dataframe that occured from the randomly seleted nodes."
+    
+    # Calculate the wider range and the percentage difference
+    if total_width_list1 > total_width_list2:
+        percentage_diff = ((total_width_list1 - total_width_list2) / total_width_list2) * 100
+        print( f"The dataframe that occured from DDI is {percentage_diff:.2f}% wider than the dataframe that occured from the randomly seleted nodes.")
+    else:
+        percentage_diff = ((total_width_list2 - total_width_list1) / total_width_list1) * 100
+        print( f"The dataframe that occured from the randomly seleted nodes is {percentage_diff:.2f}% wider than the dataframe that occured from DDI." )
 
 def normalize_dataframe(df):
     """
@@ -344,103 +346,115 @@ def dataframe_cosine_similarity(df1, df2):
     
     return average_similarity
 
+# 3. Function to perform a statistical significance test on range widths
+def statistical_significance_test(df1, df2):
+    """
+    Performs Levene's test to determine if there is a statistically significant
+    difference in the range widths of the two dataframes.
+
+    Parameters:
+        df1 (pd.DataFrame): First dataframe.
+        df2 (pd.DataFrame): Second dataframe.
+
+    Returns:
+        str: Result of Levene's test indicating significance level.
+    """
+    # Calculate ranges for each column
+    df1_ranges = [col.max() - col.min() for _, col in df1.items()]
+    df2_ranges = [col.max() - col.min() for _, col in df2.items()]
+    # Perform Levene's test
+    stat, p_value = stats.levene(df1_ranges, df2_ranges)
+    if p_value < 0.05:
+        return f"The range widths are significantly different (p-value = {p_value:.4f})."
+    else:
+        return f"The range widths are not significantly different (p-value = {p_value:.4f})."
+
     
 
-# Initialize cumulative variables
+# Initialize variables
 total_manhattan_distance = 0.0
-DDICount = 0
-RandomCount = 0
-rounds = 50
-cumulative_similarity = 0.0  # Cumulative similarity for overall average
 scaler = StandardScaler()
 
-for i in range(rounds):
-    ###############################################################################    
-    # Create the graph and match the dataset to the nodes
-    graph, node_positions = graph_creation()
-    match_dataset_to_graph(graph)
-    
-    # Perform clustering for each node and display the results
-    centers = [] 
-    radiuses = []
-    for node in graph.nodes():
-        data = graph.nodes[node]['data']
-        cluster_centers, cluster_radii = clustering(data)
-        centers.append(cluster_centers)
-        radiuses.append(cluster_radii)
-    
-    # Create subgroups using Louvain Modularity
-    subgroups = nx.community.louvain_communities(graph, seed=np.random)
-    most_important_nodes_rand = [np.random.randint(0, num_nodes) for _ in range(len(subgroups))]
-    
-    # Visualize the graph and subgroups
-    visualize_graph(graph)
-    visualize_subgroups(graph, subgroups)
+# Create the graph and match the dataset to the nodes
+graph, node_positions = graph_creation()
+match_dataset_to_graph(graph)
 
-    # Clear unnecessary data from the previous iteration
-    del data
-    batchSize = 500
-    batchStart = 0  # This means we get a batch of values each time
-    batchStop = batchSize
-    MostImportantNodes = []  # A general-purpose list that contains most important nodes of each subgroup
-    MostImportantNodesData = []
-    RandomMostImportantNodes = []
-    RandomMostImportantNodesData = []
-    
-    # List to store similarities in inner loop
-    OverallSimilarity = []
-    data = pd.read_csv(path2)
-    start = time.time()
-    
-    for j in range(3):  # Changed inner loop variable to avoid shadowing
-        new_data = new_data_importation(batchStart, batchStop, data)
-        most_important_nodes(new_data)
-        update_nodes(new_data, OverallSimilarity)
-        batchStart = batchStop + 1
-        batchStop += batchSize
-        
-    # Sorting MostImportantNodes is redundant here since you only need to do this after all updates
-    MostImportantNodes.sort()
-    
-    end = time.time()
-    del data
-    
-    RestNodesData = []  # Ensure this is initialized each time
-    for node in range(num_nodes):
-        if node in MostImportantNodes:
-            MostImportantNodesData.append(StartingPointData[node])
-        else:
-            RestNodesData.append(StartingPointData[node])
-    
-    time_elapsed = end - start
-    
-    # Resetting lists for new batch
-    NewIncomingData = []  # Reset before concatenating
-    MostImportantNodesData = pd.concat(MostImportantNodesData, axis=0, ignore_index=True)
-    RandomMostImportantNodesData = pd.concat(RandomMostImportantNodesData, axis=0, ignore_index=True)
-    RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
-    
-    # Normalize the data for accurate similarity calculation
-    Norm_MostImportantNodesData = normalize_dataframe(MostImportantNodesData)
-    Norm_RandomMostImportantNodesData = normalize_dataframe(RandomMostImportantNodesData)
-    
-    # Calculate the Cosine Similarity of the two dataframes
-    similarity_score = dataframe_cosine_similarity(Norm_MostImportantNodesData, Norm_RandomMostImportantNodesData)
-    cumulative_similarity += similarity_score  # Accumulate similarity score
-    
-    # Calculate ranges for most important nodes
-    MostImportantNodesRanges = [(MostImportantNodesData[col].min(), MostImportantNodesData[col].max()) for col in MostImportantNodesData.columns]
-    RandomMostImportantNodesRanges = [(RandomMostImportantNodesData[col].min(), RandomMostImportantNodesData[col].max()) for col in RandomMostImportantNodesData.columns]
+# Perform clustering for each node and display the results
+centers = [] 
+radiuses = []
+for node in graph.nodes():
+    data = graph.nodes[node]['data']
+    cluster_centers, cluster_radii = clustering(data)
+    centers.append(cluster_centers)
+    radiuses.append(cluster_radii)
 
-    # Call the function to compare the ranges and update counts
-    random_increment, ddi_increment = calculate_widest_range(RandomMostImportantNodesRanges, MostImportantNodesRanges)
-    RandomCount += random_increment
-    DDICount += ddi_increment
+# Create subgroups using Louvain Modularity
+subgroups = nx.community.louvain_communities(graph, seed=np.random)
+most_important_nodes_rand = [np.random.randint(0, num_nodes) for _ in range(len(subgroups))]
 
-# Calculate the overall average similarity after the loop
-average_similarity = cumulative_similarity / rounds
+# Visualize the graph and subgroups
+visualize_graph(graph)
+visualize_subgroups(graph, subgroups)
 
-# After the loop, print the total scores
-print("Overall Random Wideness Score:", RandomCount)
-print("Overall DDI Wideness Score:", DDICount)
-print("Average Cosine Similarity across all iterations:", average_similarity)
+# Clear unnecessary data from the previous iteration
+del data
+batchSize = 500
+batchStart = 0  # This means we get a batch of values each time
+batchStop = batchSize
+MostImportantNodes = []  # A general-purpose list that contains most important nodes of each subgroup
+MostImportantNodesData = []
+RandomMostImportantNodes = []
+RandomMostImportantNodesData = []
+
+
+RestNodesData = []  # Ensure this is initialized each time
+for node in range(num_nodes):
+    if node in MostImportantNodes:
+        MostImportantNodesData.append(StartingPointData[node])
+    else:
+        RestNodesData.append(StartingPointData[node])
+
+data = pd.read_csv(path2)
+start = time.time()
+
+for j in range(5):  # Changed inner loop variable to avoid shadowing
+    new_data = new_data_importation(batchStart, batchStop, data)
+    most_important_nodes(new_data)
+    update_nodes(new_data)
+    batchStart = batchStop + 1
+    batchStop += batchSize
+
+# Sorting MostImportantNodes is redundant here since you only need to do this after all updates
+MostImportantNodes.sort()
+
+end = time.time()
+del data
+
+
+time_elapsed = end - start
+
+
+MostImportantNodesData = pd.concat(MostImportantNodesData, axis=0, ignore_index=True)
+# Outliers cleaning using IQR method
+#MostImportantNodesData = remove_outliers(MostImportantNodesData)
+RandomMostImportantNodesData = pd.concat(RandomMostImportantNodesData, axis=0, ignore_index=True)
+RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
+
+# Normalize the data for accurate similarity calculation
+Norm_MostImportantNodesData = normalize_dataframe(MostImportantNodesData)
+Norm_RandomMostImportantNodesData = normalize_dataframe(RandomMostImportantNodesData)
+
+# Calculate the Cosine Similarity of the two dataframes
+
+similarity_score = dataframe_cosine_similarity(Norm_MostImportantNodesData, Norm_RandomMostImportantNodesData)
+
+# Calculate ranges for most important nodes
+MostImportantNodesRanges = [(MostImportantNodesData[col].min(), MostImportantNodesData[col].max()) for col in MostImportantNodesData.columns]
+RandomMostImportantNodesRanges = [(RandomMostImportantNodesData[col].min(), RandomMostImportantNodesData[col].max()) for col in RandomMostImportantNodesData.columns]
+# MUST ENTER THE DDI LIST FIRST AND THEN THE RANDOM LIST
+# Call the function to compare the ranges and update counts
+calculate_widest_range(MostImportantNodesRanges, RandomMostImportantNodesRanges)
+
+# Print results for the single iteration
+print("Cosine Similarity for this iteration:", similarity_score)
+print(statistical_significance_test(MostImportantNodesData, RandomMostImportantNodesData))
