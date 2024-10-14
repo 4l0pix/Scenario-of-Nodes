@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Oct 15 03:24:04 2024
+
+@author: iflora
+"""
+
 # Import necessary libraries
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -10,12 +18,22 @@ import warnings
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics.pairwise import cosine_similarity
 import scipy.stats as stats
+import random  # Needed to control randomness in general
+
 # Ignore warnings for cleaner output
 warnings.filterwarnings("ignore")
+
+# Set a global random seed
+SEED = 42
+np.random.seed(SEED)
+random.seed(SEED)
+
+#prvide the file paths
 path1 = "Cancer_Data.csv"
 path2 = "Cancer_Data_New_Big.csv"
+
 ###FOR METRICS###
-num_nodes = 40          # Define the number of nodes in the graph
+num_nodes = 50          # Define the number of nodes in the graph
 print(f"-----NODES{num_nodes}-----")
 """
 When we change the number of nodes we also need to change the incoming data for training. 
@@ -64,7 +82,7 @@ def match_dataset_to_graph(graph):
     data["diagnosis"] = data["diagnosis"].map(conversion_mapping)
     data.drop(columns="id", axis=1, inplace=True)
     # Shuffle the data
-    data = data.sample(frac=1,random_state=42)
+    data = data.sample(frac=1,random_state=SEED)
     #data=data.head(2220)
     #ogData = len(data)
     for i in range(num_nodes):
@@ -82,7 +100,7 @@ def match_dataset_to_graph(graph):
 # Function to perform K-Means clustering on data
 def clustering(data):
     # Perform K-Means clustering with 3 clusters
-    kmeans = KMeans(n_clusters=3, random_state=0)
+    kmeans = KMeans(n_clusters=3, random_state=SEED)
     cluster_labels = kmeans.fit_predict(data)
     cluster_centers = kmeans.cluster_centers_
     # Calculate the radius for each cluster
@@ -224,17 +242,31 @@ def most_important_nodes(new_data):
 def new_data_importation(head,tail,data):
     return data.iloc[head:tail]
 
+def sim4importN(new_node_data):  # Similarity for important Nodes
+    maxSim = 0  
+    maxSimIndx = -1 # If -1 is returned then we have an error
+    for i in MostImportantNodes:
+            #print(cosine_similarity(new_node_data,graph.nodes[i]['data']))
+            if cosine_similarity(new_node_data,graph.nodes[i[1]]['data']).mean() > maxSim:
+                maxSim = cosine_similarity(new_node_data,graph.nodes[i[1]]['data']).mean()
+                maxSimIndx = i[1]
+    return maxSim, maxSimIndx
+
 def update_nodes(new_data):
     head = 0
     tailSize = batchSize//len(MostImportantNodes)
-    tail = tailSize
-    for node in range(len(MostImportantNodes)):
+    tail = tailSize    
+    for node in MostImportantNodes:
         new_node_data = new_data.iloc[head:tail]
-        #graph.nodes[maxSimIndx]['data'] = pd.concat([graph.nodes[maxSimIndx]['data'], new_node_data], ignore_index=False)
+        maxSim,maxSimIndx = sim4importN(new_node_data)
+        new_node_data = new_data.iloc[head:tail]
+        graph.nodes[maxSimIndx]['data'] = pd.concat([graph.nodes[maxSimIndx]['data'], new_node_data], ignore_index=False)
         NewIncomingData.append(new_node_data)
         #print("Data was added to node:" ,maxSimIndx, "with similarity:", maxSim)
         head = tail+1
         tail += tailSize
+        
+        
         
 def remove_outliers(df):
     """
@@ -256,8 +288,8 @@ def remove_outliers(df):
         IQR = Q3 - Q1
         
         # Define bounds for outliers
-        lower_bound = Q1 - 3 * IQR # The number here is the sensitivity/strictness of outlier kicking
-        upper_bound = Q3 + 3 * IQR
+        lower_bound = Q1 - 10 * IQR # The number here is the sensitivity/strictness of outlier kicking
+        upper_bound = Q3 + 10 * IQR
         
         # Remove outliers
         df_cleaned = df_cleaned[(df_cleaned[col] >= lower_bound) & (df_cleaned[col] <= upper_bound)]
@@ -370,9 +402,7 @@ def statistical_significance_test(df1, df2):
     
 
 # Initialize variables
-total_manhattan_distance = 0.0
 scaler = StandardScaler()
-
 # Create the graph and match the dataset to the nodes
 graph, node_positions = graph_creation()
 match_dataset_to_graph(graph)
@@ -387,7 +417,7 @@ for node in graph.nodes():
     radiuses.append(cluster_radii)
 
 # Create subgroups using Louvain Modularity
-subgroups = nx.community.louvain_communities(graph, seed=np.random)
+subgroups = nx.community.louvain_communities(graph, seed=SEED)
 most_important_nodes_rand = [np.random.randint(0, num_nodes) for _ in range(len(subgroups))]
 
 # Visualize the graph and subgroups
@@ -415,7 +445,7 @@ for node in range(num_nodes):
 data = pd.read_csv(path2)
 start = time.time()
 
-for j in range(5):  # Changed inner loop variable to avoid shadowing
+for j in range(10):  # Changed inner loop variable to avoid shadowing
     new_data = new_data_importation(batchStart, batchStop, data)
     most_important_nodes(new_data)
     update_nodes(new_data)
@@ -427,7 +457,7 @@ MostImportantNodes.sort()
 
 MostImportantNodesData = pd.concat(MostImportantNodesData, axis=0, ignore_index=True)
 # Outliers cleaning using IQR method
-#MostImportantNodesData = remove_outliers(MostImportantNodesData)
+MostImportantNodesData = remove_outliers(MostImportantNodesData)
 RandomMostImportantNodesData = pd.concat(RandomMostImportantNodesData, axis=0, ignore_index=True)
 RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
 # Stopping the watch
