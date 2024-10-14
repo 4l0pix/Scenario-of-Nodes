@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 path1 = "Cancer_Data.csv"
 path2 = "Cancer_Data_New_Big.csv"
 ###FOR METRICS###
-num_nodes = 20          # Define the number of nodes in the graph
+num_nodes = 40          # Define the number of nodes in the graph
 print(f"-----NODES{num_nodes}-----")
 """
 When we change the number of nodes we also need to change the incoming data for training. 
@@ -27,7 +27,6 @@ StartingPointData = []    # The data that are used as a starting point in the mo
 NewIncomingData = []     # All the new data that are used to update the most important node
 MostImportantNodesData = [] # The data of the most important nodes that will help us determine the similarity score
 RestNodesData = []
-TaskRanges = []
 
 
 # Function to create a random graph with nodes and edges
@@ -66,8 +65,8 @@ def match_dataset_to_graph(graph):
     data.drop(columns="id", axis=1, inplace=True)
     # Shuffle the data
     data = data.sample(frac=1,random_state=42)
-    data=data.head(2220)
-    ogData = len(data)
+    #data=data.head(2220)
+    #ogData = len(data)
     for i in range(num_nodes):
         # Create subsets of the data for each graph node
         subset_size = len(data) // num_nodes
@@ -98,6 +97,9 @@ def clustering(data):
 
 # Function to calculate the importance of nodes in a subgroup
 def importance(graph, subgroup):
+    alpha = 0.5
+    beta = 0.5
+    gamma = 0.5
     Subgraph = graph.subgraph(subgroup)
     # Calculate the Degree Centrality
     centrality_deg = nx.degree_centrality(Subgraph)
@@ -109,14 +111,14 @@ def importance(graph, subgroup):
     #print("Betweenness Centrality-->", bet_centrality)
     #print("Katz Centrality-->", k_centrality)
     # Create a new dictionary for the means
-    mean_dict = {}
+    theta_dict = {}
     # Iterate through the keys
     for key in centrality_deg.keys():
         # Calculate the mean of the values for each key from the three dictionaries
-        mean_value = np.mean([centrality_deg[key], bet_centrality[key], k_centrality[key]])
+        theta_value = alpha*centrality_deg[key]+beta*bet_centrality[key]+gamma*k_centrality[key]
         # Store the mean value in the new dictionary
-        mean_dict[key] = mean_value
-    return mean_dict
+        theta_dict[key] = theta_value
+    return theta_dict
 
 # Function to visualize subgroups in the graph
 def visualize_subgroups(graph, subgroups):
@@ -132,25 +134,18 @@ def visualize_subgroups(graph, subgroups):
     plt.title(f'Subgroups\nNumber:{len(subgroups)}')
     plt.show()
 
-def euclid_dist(sample,centroids,radiuses):
-    b = -5
-    a = b/2   # Parameters for the DDI
-    
+def DDI_func(sample,centroids,radiuses):
+    a = 0.2   # Parameters for the DDI
+    b = a/3
+    # Small epsilon value to prevent DDI from being zero
+    epsilon = 1e-10
     # We calculate the euclidean distances between each sample and each node centroid
-   # print("Sample:",len(sample))
-   # print("Centroids1:",len(centroids[0]))
-   # print("Centroids2:",len(centroids[1]))
-   # print("Centroids3:",len(centroids[2]))
     distances=[math.dist(sample,centroids[0]),math.dist(sample,centroids[1]),math.dist(sample,centroids[2])]
-    #print("\n")
-    #for index,i in enumerate (distances):
-        #print(f"Distance{index}--->",i)
     closest_dist = min(distances) # We get the closest distance
-    #furthest_dist = max(distances)  # And the greatest distance
+    # Furthest_dist = max(distances)  # And the greatest distance
     rad_index = distances.index(closest_dist) # And the radius of the cluster with the closest distance
-    ddi = 1/1+math.exp((a*closest_dist)-b) if (closest_dist <= radiuses[rad_index]) else 0 
-    #print(f'[{closest_dist,furthest_dist}]')
-    #print("X-->",closest_dist,"DDI-->",ddi)
+    ddi = (1 / (1 + math.exp(a * closest_dist - b)) + epsilon) if closest_dist <= radiuses[rad_index] else epsilon    #print(f'[{closest_dist,furthest_dist}]')
+    #print(ddi)
     return ddi, radiuses[rad_index]
 
 def final_importance_degree(centers,radiuses,DDI,subgroup,final_i_d,importance_degree,new_data):
@@ -160,17 +155,22 @@ def final_importance_degree(centers,radiuses,DDI,subgroup,final_i_d,importance_d
         # For every sample we will need 3 distances
         for index,row in new_data.iloc[1:].iterrows():
             sample = row.values # We get each sample
-            ddi,rad = euclid_dist(sample,centroids,radius)
+            ddi,rad = DDI_func(sample,centroids,radius)
             # The DDI list hosts [node_index, DDI, radius of the cluster]
             DDI.append([i,ddi,rad])
         subgroup = tuple(subgroup)       
         for j in range(len(subgroup)): # For each node in the subgroup (subgroup is a tuple of indexes)
             for k in DDI: # For every sublist in the DDI list
-                if k[0] == subgroup[j]: # If the 1st column(node index) == the node we are currently dealing with    
-                    final_i_d[j] = round((k[1]*importance_degree[k[0]]),4)           
+                if k[0] == subgroup[j]: # If the 1st column(node index) == the node we are currently dealing with  
+                    final_i_d[j] = round((importance_degree[k[0]]*(1/k[1])),3)   #k[0] is the node  
+                    # and here we practised the d = theta*1/DDI
+    # last but not least we need to normalize the importance degree
+    #once again using the min-max normalization
+    if ((max(final_i_d)-min(final_i_d)) != 0):    
+        final_i_d = [(float(i)-min(final_i_d))/(max(final_i_d)-min(final_i_d)) for i in final_i_d]
+    #print(final_i_d)
     return final_i_d
 
-            
 def most_important_nodes(new_data):
     global MostImportantNodes, RandomMostImportantNodesData, RandomMostImportantNodes
     importance_degree = {node: 0 for node in range(num_nodes)}
@@ -183,7 +183,7 @@ def most_important_nodes(new_data):
     for i in subgroups:
         i = list(i)  # Convert set to list for easier handling
         final_i_d = [0] * len(i)  # Initialize final importance degree list once per subgroup
-        mean_dict = importance(graph, i)  # Calculate mean importance for each node in subgroup
+        theta_dict = importance(graph, i)  # Calculate theta importance for each node in subgroup
 
         for idx, node in enumerate(i):
             # For the random scenario
@@ -193,11 +193,10 @@ def most_important_nodes(new_data):
                 RMIN_set.add(node)  # Update set to avoid future duplicate checks
 
             # Update importance degree for each node
-            importance_degree[node] = mean_dict[node]
+            importance_degree[node] = theta_dict[node]
 
         # Calculate final importance degree
         final_i_d = final_importance_degree(centers, radiuses, DDI, i, final_i_d, importance_degree, new_data)
-        
         # Find the node with the maximum importance degree
         max_fid = max(final_i_d)
         max_fid_index = final_i_d.index(max_fid)
@@ -221,7 +220,6 @@ def most_important_nodes(new_data):
 
     # Convert to list of nodes with highest degree per subgroup
     MostImportantNodes = list(most_important.values())    
-
 
 def new_data_importation(head,tail,data):
     return data.iloc[head:tail]
@@ -258,8 +256,8 @@ def remove_outliers(df):
         IQR = Q3 - Q1
         
         # Define bounds for outliers
-        lower_bound = Q1 - 2 * IQR # The number here is the sensitivity/strictness of outlier kicking
-        upper_bound = Q3 + 2 * IQR
+        lower_bound = Q1 - 3 * IQR # The number here is the sensitivity/strictness of outlier kicking
+        upper_bound = Q3 + 3 * IQR
         
         # Remove outliers
         df_cleaned = df_cleaned[(df_cleaned[col] >= lower_bound) & (df_cleaned[col] <= upper_bound)]
@@ -365,9 +363,9 @@ def statistical_significance_test(df1, df2):
     # Perform Levene's test
     stat, p_value = stats.levene(df1_ranges, df2_ranges)
     if p_value < 0.05:
-        return f"The range widths are significantly different (p-value = {p_value:.4f})."
+        return f"The range widths are significantly different (p-value = {p_value:.3f})."
     else:
-        return f"The range widths are not significantly different (p-value = {p_value:.4f})."
+        return f"The range widths are not significantly different (p-value = {p_value:.3f})."
 
     
 
@@ -427,26 +425,22 @@ for j in range(5):  # Changed inner loop variable to avoid shadowing
 # Sorting MostImportantNodes is redundant here since you only need to do this after all updates
 MostImportantNodes.sort()
 
-end = time.time()
-del data
-
-
-time_elapsed = end - start
-
-
 MostImportantNodesData = pd.concat(MostImportantNodesData, axis=0, ignore_index=True)
 # Outliers cleaning using IQR method
 #MostImportantNodesData = remove_outliers(MostImportantNodesData)
 RandomMostImportantNodesData = pd.concat(RandomMostImportantNodesData, axis=0, ignore_index=True)
 RestNodesData = pd.concat(RestNodesData, axis=0, ignore_index=True)
-
+# Stopping the watch
+end = time.time()
+time_elapsed = end - start
+print("Time elapsed-->",time_elapsed)
 # Normalize the data for accurate similarity calculation
 Norm_MostImportantNodesData = normalize_dataframe(MostImportantNodesData)
 Norm_RandomMostImportantNodesData = normalize_dataframe(RandomMostImportantNodesData)
 
 # Calculate the Cosine Similarity of the two dataframes
 
-similarity_score = dataframe_cosine_similarity(Norm_MostImportantNodesData, Norm_RandomMostImportantNodesData)
+similarity_score = round(dataframe_cosine_similarity(Norm_MostImportantNodesData, Norm_RandomMostImportantNodesData),3)
 
 # Calculate ranges for most important nodes
 MostImportantNodesRanges = [(MostImportantNodesData[col].min(), MostImportantNodesData[col].max()) for col in MostImportantNodesData.columns]
@@ -456,5 +450,5 @@ RandomMostImportantNodesRanges = [(RandomMostImportantNodesData[col].min(), Rand
 calculate_widest_range(MostImportantNodesRanges, RandomMostImportantNodesRanges)
 
 # Print results for the single iteration
-print("Cosine Similarity for this iteration:", similarity_score)
+print("Cosine Similarity:", similarity_score)
 print(statistical_significance_test(MostImportantNodesData, RandomMostImportantNodesData))
