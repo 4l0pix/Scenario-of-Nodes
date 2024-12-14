@@ -410,7 +410,6 @@ for node in graph.nodes():
 
 # Create subgroups using Louvain Modularity
 subgroups = nx.community.louvain_communities(graph, seed=SEED)
-most_important_nodes_rand = [np.random.randint(0, num_nodes) for _ in range(len(subgroups))]
 
 # Visualize the graph and subgroups
 visualize_graph(graph)
